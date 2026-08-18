@@ -1,75 +1,92 @@
-# Pi + LM Studio + TelePi setup (WSL on Windows)
+# Local Agent Setup: Pi + LM Studio + Qwen 3.8 27B + TelePi (WSL)
 
-Guide for running a **local coding agent** with **Qwen 3.8 27B** in LM Studio, **Pi** as the harness, and **TelePi** for Telegram access from your phone.
+Guide for running a **local coding agent** on Windows/WSL using:
 
-This repo also includes helper scripts under `scripts/`.
+- **LM Studio** — serves Qwen 3.8 27B locally
+- **Pi** — minimal agent harness (tool loop)
+- **TelePi** — Telegram bridge for phone access
+
+Tested on WSL2 (Ubuntu) with LM Studio on Windows host.
 
 ---
 
-## Architecture
+## Recommended stack
 
 ```text
-Phone (Telegram)
-    ↕ TelePi (WSL, systemd user service)
-Pi coding agent (WSL)
-    ↕ HTTP OpenAI-compatible API
-LM Studio (Windows) → Qwen 3.8 27B
+LM Studio (Qwen 3.8 27B on Windows)
+        ↓
+       Pi (in WSL)
+        ↓
+     TelePi (Telegram on phone)
 ```
 
-- **LM Studio** runs on **Windows** (GPU).
-- **Pi + TelePi** run in **WSL** (Ubuntu).
-- Do **not** use Windows `npm` from WSL — it breaks Pi installs. Use **Bun** in WSL instead.
+**Why Pi (not Goose / Oh My Pi)?**
+
+- Qwen 3.8 27B + LM Studio is **proven on vanilla Pi** (minimal system prompt = more context for local 27B).
+- Goose has built-in Telegram but more friction with LM Studio + Qwen tool loops.
+- Oh My Pi is Pi++ (32 tools); heavier and unproven with local 27B — upgrade later if Pi feels too bare.
 
 ---
 
-## Why the default Windows install failed
+## Why Windows native install failed
 
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| `curl -fsSL https://pi.dev/install.sh \| bash` fails | Install script often returns 500; also wrong path on Windows | Install in **WSL** with Bun |
-| `pi install npm:pi-lmstudio` fails with stack overflow | WSL uses **Linux Node** but **Windows npm** (`/mnt/c/Program Files/nodejs/npm`) | Set `"npmCommand": ["bun"]` in `~/.pi/agent/settings.json` |
-| WSL cannot reach LM Studio | Server bound to `127.0.0.1` only on Windows | Bind to `0.0.0.0` (see below) |
+The `curl -fsSL https://pi.dev/install.sh | bash` path failed because this environment mixes:
+
+- **Linux Node** (Cursor/WSL)
+- **Windows npm** (`/mnt/c/Program Files/nodejs/npm`)
+
+That breaks `pi install` with `Maximum call stack size exceeded`.
+
+**Fix:** Install and run **Pi in WSL using Bun**, not Windows npm.
 
 ---
 
-## Installed components (WSL)
+## Prerequisites
 
-| Tool | Path | Install command |
-|------|------|-----------------|
-| Bun | `~/.bun/bin/bun` | `curl -fsSL https://bun.sh/install \| bash` |
-| Pi | `~/.bun/bin/pi` | `bun install -g @earendil-works/pi-coding-agent` |
-| pi-lmstudio | `~/.pi/agent/npm/` | `cd ~/.pi/agent/npm && bun add pi-lmstudio` |
-| TelePi | `~/.bun/bin/telepi` | `bun install -g @futurelab-studio/telepi` |
+- Windows 11 + WSL2 (Ubuntu)
+- LM Studio on Windows with **qwen/qwen3.8-27b** downloaded
+- Bun (installed to `~/.bun` via https://bun.sh)
+- Node 22.19+ (for Pi engine requirement; Bun satisfies runtime)
 
-Ensure `~/.bashrc` includes:
+---
+
+## One-time install (WSL)
 
 ```bash
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
+source ~/.bashrc
+export PATH="$HOME/.bun/bin:$PATH"
+
+# Install Bun if missing
+curl -fsSL https://bun.sh/install | bash
+source ~/.bashrc
+
+# Install Pi + TelePi
+bun install -g @earendil-works/pi-coding-agent
+bun install -g @futurelab-studio/telepi
+
+# Verify
+pi --version    # e.g. 0.84.2
+telepi version  # e.g. 0.4.2
 ```
 
-Then: `source ~/.bashrc`
-
-Verify:
+Or run the repo setup script:
 
 ```bash
-pi --version      # e.g. 0.84.2
-telepi version    # e.g. 0.4.2
+~/repos/random-general-repo-cursor-remote-control/scripts/setup-pi-telepi-wsl.sh
 ```
 
----
+### pi-lmstudio extension
 
-## Config files (WSL)
+`pi install npm:pi-lmstudio` fails on this machine (Windows npm). Install manually with Bun:
 
-| File | Purpose |
-|------|---------|
-| `~/.pi/agent/settings.json` | Pi settings; use `"npmCommand": ["bun"]`, register `npm:pi-lmstudio` |
-| `~/.pi/agent/models.json` | LM Studio provider + Qwen model |
-| `~/.pi/agent/lmstudio.json` | LM Studio URL(s) for pi-lmstudio extension |
-| `~/.pi/agent/auth.json` | Dummy API key for local LM Studio |
-| `~/.config/telepi/config.env` | TelePi bot token, allowed user IDs, workspace |
+```bash
+mkdir -p ~/.pi/agent/npm
+cd ~/.pi/agent/npm
+bun init -y
+bun add pi-lmstudio
+```
 
-### Example `~/.pi/agent/settings.json`
+Register in `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -79,9 +96,94 @@ telepi version    # e.g. 0.4.2
 }
 ```
 
-### Example `~/.pi/agent/models.json`
+---
 
-Replace `172.28.112.1` with your WSL→Windows gateway IP (`ip route show default | awk '{print $3}'`).
+## LM Studio (Windows)
+
+### Load the model
+
+1. Open **LM Studio** on Windows.
+2. Load **qwen/qwen3.8-27b**.
+3. **Developer tab → Start Server** (port 1234 default).
+
+### Critical settings
+
+| Setting | Recommendation |
+|---------|----------------|
+| Context length | **32k minimum** (not 8k default) |
+| Reasoning effort | **medium** or **low** (not xhigh — burns tokens/time) |
+| Preserve thinking | OK for agents, but eats context on long sessions |
+
+### WSL networking fix (required)
+
+By default LM Studio binds to **`127.0.0.1` only**. WSL **cannot** reach Windows localhost on default NAT networking.
+
+**Symptom:** LM Studio running, but from WSL `curl http://172.28.112.1:1234/v1/models` times out.
+
+**Fix A — Bind to all interfaces (what we used):**
+
+Edit `C:\Users\<you>\.lmstudio\.internal\http-server-config.json`:
+
+```json
+{
+  "networkInterface": "0.0.0.0",
+  "port": 1234
+}
+```
+
+Restart server from PowerShell or WSL:
+
+```powershell
+lms server stop
+lms server start --bind 0.0.0.0
+```
+
+Or from WSL:
+
+```bash
+/mnt/c/Users/<you>/.lmstudio/bin/lms.exe server stop
+/mnt/c/Users/<you>/.lmstudio/bin/lms.exe server start --bind 0.0.0.0
+```
+
+Verify from WSL:
+
+```bash
+HOST=$(ip route show default | awk '{print $3}')
+curl "http://${HOST}:1234/v1/models"
+```
+
+**Fix B — WSL mirrored networking (alternative):**
+
+Create `C:\Users\<you>\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+Run `wsl --shutdown`, reopen WSL. Then Pi can use `http://127.0.0.1:1234/v1`.
+
+**Security:** `0.0.0.0` exposes LM Studio to your LAN. Fine for home; enable LM Studio auth on shared networks.
+
+---
+
+## Pi configuration
+
+Config directory: `~/.pi/agent/`
+
+### `settings.json`
+
+```json
+{
+  "npmCommand": ["bun"],
+  "packages": ["npm:pi-lmstudio"],
+  "shellPath": "/bin/bash"
+}
+```
+
+### `models.json`
+
+Replace `172.28.112.1` with your WSL gateway IP (`ip route show default | awk '{print $3}'`):
 
 ```json
 {
@@ -107,9 +209,9 @@ Replace `172.28.112.1` with your WSL→Windows gateway IP (`ip route show defaul
 }
 ```
 
-> **Note:** Simon Willison used `openai-responses` successfully with Pi. If tool calling misbehaves, try `openai-completions` (current default here) or switch to `openai-responses`.
+Use `"api": "openai-responses"` if your LM Studio build supports `/v1/responses` and chat completions misbehave.
 
-### Example `~/.pi/agent/lmstudio.json`
+### `lmstudio.json`
 
 ```json
 {
@@ -120,7 +222,7 @@ Replace `172.28.112.1` with your WSL→Windows gateway IP (`ip route show defaul
 }
 ```
 
-### Example `~/.pi/agent/auth.json`
+### `auth.json`
 
 ```json
 {
@@ -133,121 +235,29 @@ Replace `172.28.112.1` with your WSL→Windows gateway IP (`ip route show defaul
 
 ---
 
-## LM Studio (Windows)
-
-### 1. Load the model
-
-- Open **LM Studio** on Windows.
-- Load **qwen/qwen3.8-27b** (or your preferred Qwen 3.8 quant).
-
-### 2. Server settings
-
-- **Developer tab → Start Server** (port `1234` by default).
-- Set **context to 32k minimum** (not 8192 — Qwen thinking will consume it).
-- Set **reasoning effort to medium or low** (not `xhigh` for everyday use).
-
-### 3. Critical: WSL network binding
-
-By default LM Studio binds to **`127.0.0.1` only**. WSL **cannot** reach Windows localhost in NAT mode.
-
-**Symptom:** LM Studio appears running; `curl http://172.28.112.1:1234/v1/models` from WSL times out.
-
-**Fix A — Bind to all interfaces (used in this setup):**
-
-Edit `C:\Users\cjfit\.lmstudio\.internal\http-server-config.json`:
-
-```json
-"networkInterface": "0.0.0.0"
-```
-
-Restart the server:
-
-```powershell
-lms server stop
-lms server start --bind 0.0.0.0
-```
-
-Or from WSL:
+## Smoke test
 
 ```bash
-/mnt/c/Users/cjfit/.lmstudio/bin/lms.exe server stop
-/mnt/c/Users/cjfit/.lmstudio/bin/lms.exe server start --bind 0.0.0.0
-```
-
-**Fix B — WSL mirrored networking (alternative):**
-
-Create `C:\Users\cjfit\.wslconfig`:
-
-```ini
-[wsl2]
-networkingMode=mirrored
-```
-
-Then run `wsl --shutdown` and reopen WSL. Pi can then use `http://127.0.0.1:1234/v1` and LM Studio can stay on localhost.
-
-### 4. Verify from WSL
-
-```bash
-# Detect gateway IP
-ip route show default | awk '{print $3}'
-
-# Should return JSON model list including qwen/qwen3.8-27b
-curl "http://$(ip route show default | awk '{print $3}'):1234/v1/models"
-```
-
-Or use the repo script:
-
-```bash
-~/repos/random-general-repo-cursor-remote-control/scripts/detect-lmstudio-host.sh
-```
-
-### Security note
-
-Binding to `0.0.0.0` exposes the API on your LAN. Fine for home use; enable LM Studio authentication on shared networks.
-
----
-
-## Pi usage
-
-### List models
-
-```bash
-pi --list-models
-```
-
-Expected:
-
-```text
-provider  model             context  ...
-lmstudio  qwen/qwen3.8-27b  128K     ...
-```
-
-### Smoke test (non-interactive)
-
-```bash
+export PATH="$HOME/.bun/bin:$PATH"
 cd ~/repos/random-general-repo-cursor-remote-control
-pi -p --provider lmstudio --model qwen/qwen3.8-27b --thinking low --no-tools "Reply with exactly: pi-ok"
+
+# List models (uses pi-lmstudio discovery)
+pi --list-models
+
+# One-shot test (first run may take 30–90s on 27B)
+pi -p --provider lmstudio --model qwen/qwen3.8-27b --thinking low --no-tools "Reply exactly: pi-ok"
+
+# Interactive session
+pi --provider lmstudio --model qwen/qwen3.8-27b --thinking medium
 ```
 
-Or run:
+Repo script:
 
 ```bash
 ~/repos/random-general-repo-cursor-remote-control/scripts/pi-smoke-test.sh
 ```
 
-First response may take **30–90 seconds** on a 27B local model.
-
-### Interactive session
-
-```bash
-cd ~/repos/random-general-repo-cursor-remote-control
-pi --provider lmstudio --model qwen/qwen3.8-27b --thinking medium
-```
-
-Inside Pi:
-
-- `/model` — switch models
-- `/handoff` — hand session to TelePi (after TelePi setup)
+Inside Pi: `/model` to switch models.
 
 ---
 
@@ -255,31 +265,30 @@ Inside Pi:
 
 ### Prerequisites
 
-- Telegram bot token from [@BotFather](https://t.me/BotFather) (`/newbot`)
-- Your numeric Telegram user ID from [@userinfobot](https://t.me/userinfobot)
-- Pi working locally first
+1. **Bot token** — [@BotFather](https://t.me/BotFather) → `/newbot`
+2. **Your Telegram user ID** — [@userinfobot](https://t.me/userinfobot) (numeric)
+3. Pi working locally first (smoke test above)
 
-### Setup
-
-**Interactive:**
+### Setup (WSL)
 
 ```bash
+export PATH="$HOME/.bun/bin:$PATH"
 telepi setup
 ```
 
-**Non-interactive:**
+Prompts for:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_ALLOWED_USER_IDS` (your numeric ID)
+- `DEFAULT_WORKSPACE` → e.g. `/home/chris/repos/random-general-repo-cursor-remote-control`
+
+Non-interactive:
 
 ```bash
 telepi setup "YOUR_BOT_TOKEN" "YOUR_TELEGRAM_ID" "/home/chris/repos/random-general-repo-cursor-remote-control"
 ```
 
-Config is written to `~/.config/telepi/config.env`:
-
-```bash
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_ALLOWED_USER_IDS=123456789
-DEFAULT_WORKSPACE=/home/chris/repos/random-general-repo-cursor-remote-control
-```
+Config file: `~/.config/telepi/config.env`
 
 Example template: `~/.config/telepi/config.env.example`
 
@@ -288,72 +297,73 @@ Example template: `~/.config/telepi/config.env.example`
 ```bash
 loginctl enable-linger "$USER"
 systemctl --user status telepi.service
-systemctl --user restart telepi.service   # if needed
 telepi status
 ```
 
-### Daily workflow
+### Daily use
 
-1. Start LM Studio server on Windows (with `0.0.0.0` bind if using NAT WSL).
-2. In WSL: `cd ~/repos/random-general-repo-cursor-remote-control && pi`
-3. In Pi: `/handoff`
-4. On phone: open your Telegram bot → `/start` → send prompts
-5. When back at desk: `/handback` in Telegram to resume in terminal
+1. Start Pi in your repo: `pi`
+2. Run `/handoff` inside Pi
+3. Open Telegram → your bot → `/start`
+4. Send prompts from phone
+5. `/handback` in Telegram to resume in terminal
 
 ---
 
-## Repo helper scripts
-
-Run the full setup (reinstall/config refresh):
-
-```bash
-~/repos/random-general-repo-cursor-remote-control/scripts/setup-pi-telepi-wsl.sh
-```
+## Repo scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/setup-pi-telepi-wsl.sh` | Install Pi/TelePi via Bun, write config templates |
-| `scripts/detect-lmstudio-host.sh` | Find reachable LM Studio host IP from WSL |
-| `scripts/pi-smoke-test.sh` | curl + `pi --list-models` + quick prompt test |
+| `scripts/setup-pi-telepi-wsl.sh` | Install Pi/TelePi, write config, detect LM Studio host |
+| `scripts/detect-lmstudio-host.sh` | Find reachable LM Studio IP from WSL |
+| `scripts/pi-smoke-test.sh` | curl + `pi --list-models` + one-shot prompt |
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---------|--------------|-----|
-| WSL curl to `:1234` times out | LM Studio on `127.0.0.1` only | Bind `0.0.0.0` (see above) |
-| `pi install` npm stack overflow | Windows npm in WSL | Use Bun; `"npmCommand": ["bun"]` |
-| Pi `Request timed out` | Model thinking too long / server down | Lower thinking; confirm curl works |
-| Empty tool calls / no file reads | Wrong API mode or reasoning too high | Try `openai-completions`, `--thinking low` |
-| Gateway IP changed after reboot | WSL NAT IP drift | Re-run `detect-lmstudio-host.sh`, update `models.json` |
-| TelePi bot silent | Service not running / wrong token | `telepi status`, check `config.env` |
+| Problem | Fix |
+|---------|-----|
+| `pi` not found | `source ~/.bashrc` or `export PATH="$HOME/.bun/bin:$PATH"` |
+| `pi install` npm stack overflow | Use `"npmCommand": ["bun"]` in settings.json; install extensions with `bun add` |
+| WSL can't reach LM Studio | Bind server to `0.0.0.0` (see above) or enable WSL mirrored networking |
+| Pi request timeout | LM Studio not running; model on xhigh reasoning; context too small |
+| Tools don't execute | Try `--thinking low`; confirm model ID matches `curl .../v1/models` |
+| Gateway IP changed after reboot | Re-run `detect-lmstudio-host.sh`; update `models.json` baseUrl |
+| TelePi bot silent | `telepi status`; check allowlist IDs; `systemctl --user restart telepi` |
+
+---
+
+## Paths reference (this machine)
+
+| Item | Path |
+|------|------|
+| Pi binary | `~/.bun/bin/pi` |
+| TelePi binary | `~/.bun/bin/telepi` |
+| Pi config | `~/.pi/agent/` |
+| TelePi config | `~/.config/telepi/config.env` |
+| LM Studio server config | `C:\Users\cjfit\.lmstudio\.internal\http-server-config.json` |
+| LM Studio CLI | `C:\Users\cjfit\.lmstudio\bin\lms.exe` |
+| WSL gateway IP (current) | `172.28.112.1` (may change — detect dynamically) |
+
+---
+
+## Alternatives considered (for context)
+
+| Tool | Telegram | Local Qwen 3.8 | Notes |
+|------|----------|----------------|-------|
+| **Pi + TelePi** | via TelePi | ✅ proven | **Chosen stack** |
+| Goose | built-in | ⚠️ some LM Studio friction | Good if Telegram zero-config matters more |
+| Oh My Pi | extensions | unproven on 27B | Upgrade path from Pi |
+| OpenClaw | built-in | ✅ | Heavier personal-assistant style |
+| Cursor remote | iOS app | N/A | Different use case (Cursor agents) |
 
 ---
 
 ## After reboot checklist
 
-1. **Windows:** Start LM Studio, load Qwen 3.8 27B.
-2. **Windows:** `lms server start --bind 0.0.0.0` (if not using mirrored WSL).
-3. **WSL:** `curl http://$(ip route show default | awk '{print $3}'):1234/v1/models`
-4. **WSL:** `pi --list-models`
-5. **WSL:** `telepi status` (TelePi should auto-start if systemd user service enabled)
-
----
-
-## Decision log (why Pi, not Goose/OpenClaw/Oh My Pi)
-
-- **Pi + Qwen 3.8 27B** is documented working (Simon Willison, LM Studio, tool calling).
-- **TelePi** adds Telegram without building a bot yourself.
-- **Goose** has built-in Telegram but more LM Studio+Qwen friction; good fallback.
-- **Oh My Pi** is Pi++ (32 tools, heavier context); try only after Pi works and feels too minimal.
-
----
-
-## References
-
-- [Pi coding agent](https://github.com/badlogic/pi-mono)
-- [pi-lmstudio extension](https://www.npmjs.com/package/pi-lmstudio)
-- [TelePi](https://github.com/williamleong/TelePi)
-- [LM Studio — Serve on Local Network](https://lmstudio.ai/docs/developer/core/server/serve-on-network)
-- [Qwen 3.8 27B — Simon Willison](https://simonwillison.net/2026/Aug/16/qwen-38-27b/)
+1. Start LM Studio on Windows; load qwen3.8-27b
+2. `lms server start --bind 0.0.0.0` (if GUI resets to localhost-only)
+3. From WSL: `curl http://$(ip route show default | awk '{print $3}'):1234/v1/models`
+4. `pi --list-models` then start session
+5. TelePi: `telepi status` (systemd user service should auto-start if configured)
