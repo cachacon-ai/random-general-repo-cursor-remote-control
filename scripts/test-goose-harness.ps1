@@ -38,7 +38,9 @@ $serve = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'goose.exe' 
 if (-not $serve) { Fail 'goose serve not running (start Goose desktop app)' }
 Write-Host "OK (pid $($serve.ProcessId))"
 Write-Host '== 6/7 Gateway process =='
-$gw = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'goose.exe' -and $_.CommandLine -like '*gateway start telegram*' })
+$gw = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -eq 'goose.exe' -and $_.CommandLine -match 'goose\.exe"?\s+gateway\s+start\s+telegram'
+})
 if ($gw.Count -eq 0) { Fail 'Telegram gateway process not running' }
 if ($gw.Count -gt 1) { Fail "Multiple gateway processes ($($gw.Count)); kill duplicates" }
 Write-Host "OK (pid $($gw[0].ProcessId))"
