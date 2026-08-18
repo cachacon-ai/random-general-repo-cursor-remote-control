@@ -34,3 +34,15 @@ Native Windows Remote Control workers currently crash on some builds (`better-sq
 4. Continue from the Cursor iOS app inbox.
 
 Worker dashboard: https://cursor.com/agents
+
+## Local agent (Pi + LM Studio + TelePi)
+
+For a **local Qwen 3.8 27B agent** in WSL with **Telegram** phone access, see **[LOCAL-AGENT-SETUP.md](LOCAL-AGENT-SETUP.md)** (Pi harness, LM Studio on Windows, TelePi bridge, WSL networking fix).
+
+Quick start (WSL):
+
+```bash
+~/repos/random-general-repo-cursor-remote-control/scripts/setup-pi-telepi-wsl.sh
+~/repos/random-general-repo-cursor-remote-control/scripts/pi-smoke-test.sh
+telepi setup
+```
