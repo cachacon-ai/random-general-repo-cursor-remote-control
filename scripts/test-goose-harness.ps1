@@ -33,11 +33,16 @@ try {
   if (-not $resp.ok) { Fail "sendMessage failed: $($resp | ConvertTo-Json -Compress)" }
 } catch { Fail "Telegram outbound failed: $($_.Exception.Message)" }
 Write-Host 'OK'
-Write-Host '== 5/5 Gateway process =='
-$gw = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'goose.exe' -and $_.CommandLine -like '*gateway start telegram*' }
-if (-not $gw) { Fail 'Telegram gateway process not running' }
-Write-Host "OK (pid $($gw.ProcessId))"
-Write-Host '== 6/6 Gateway session agent path =='
+Write-Host '== 5/7 Goose serve =='
+$serve = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'goose.exe' -and $_.CommandLine -like '*goose.exe serve*' }
+if (-not $serve) { Fail 'goose serve not running (start Goose desktop app)' }
+Write-Host "OK (pid $($serve.ProcessId))"
+Write-Host '== 6/7 Gateway process =='
+$gw = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'goose.exe' -and $_.CommandLine -like '*gateway start telegram*' })
+if ($gw.Count -eq 0) { Fail 'Telegram gateway process not running' }
+if ($gw.Count -gt 1) { Fail "Multiple gateway processes ($($gw.Count)); kill duplicates" }
+Write-Host "OK (pid $($gw[0].ProcessId))"
+Write-Host '== 7/7 Gateway session agent path =='
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $out = & $GooseExe run -t 'Reply with exactly: SESSION-OK' --resume --session-id 20260818_21 2>&1 | Out-String
 $sw.Stop()
