@@ -24,8 +24,9 @@ Write-Host '== 2/5 Goose agent path (3 runs) =='
 Write-Host '== 3/5 Gateway pairing (config) =='
 $config = Get-Content 'C:\Users\cjfit\AppData\Roaming\Block\goose\config\config.yaml' -Raw
 if ($config -notmatch '7993462191') { Fail 'Telegram user not paired in config.yaml' }
-if ($config -notmatch 'session_id:\s*20260818_21') { Fail 'Gateway session_id missing from config.yaml' }
-Write-Host 'OK'
+if ($config -notmatch 'session_id:\s*(\d{8}_\d+)') { Fail 'Gateway session_id missing from config.yaml' }
+$SessionId = $Matches[1]
+Write-Host "OK (session $SessionId)"
 Write-Host '== 4/5 Telegram outbound =='
 $body = @{ chat_id = $ChatId; text = "Goose harness self-test passed at $(Get-Date -Format 'HH:mm:ss'). Agent replied: $Expected" } | ConvertTo-Json
 try {
@@ -46,7 +47,12 @@ if ($gw.Count -gt 1) { Fail "Multiple gateway processes ($($gw.Count)); kill dup
 Write-Host "OK (pid $($gw[0].ProcessId))"
 Write-Host '== 7/7 Gateway session agent path =='
 $sw = [Diagnostics.Stopwatch]::StartNew()
-$out = & $GooseExe run -t 'Reply with exactly: SESSION-OK' --resume --session-id 20260818_21 2>&1 | Out-String
+Push-Location 'C:\Users\cjfit'
+try {
+  $out = cmd /c "`"$GooseExe`" run -t `"Reply with exactly: SESSION-OK`" --resume --session-id $SessionId 2>&1"
+} finally {
+  Pop-Location
+}
 $sw.Stop()
 if ($out -notmatch 'SESSION-OK') { Fail "Gateway session relay failed:`n$out" }
 if ($sw.Elapsed.TotalSeconds -gt 30) { Fail "Gateway session too slow: $($sw.Elapsed.TotalSeconds)s" }

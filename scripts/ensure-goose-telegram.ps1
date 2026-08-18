@@ -70,6 +70,13 @@ if ($gateways.Count -gt 1) { Fail "Still have $($gateways.Count) gateway process
 Write-Host "OK (gateway pid $($gateways[0].ProcessId))"
 
 Write-Host '== Pairing code =='
+$config = Get-Content $ConfigPath -Raw
+$alreadyPaired = $config -match '7993462191' -and $config -match 'session_id:\s*\d{8}_\d+'
+if ($alreadyPaired) {
+  Write-Host 'OK (already paired in config; skipping code send)'
+  exit 0
+}
+
 $code = Get-ValidPairingCode
 if (-not $code) {
   $pairOut = & $GooseExe gateway pair telegram 2>&1 | Out-String
