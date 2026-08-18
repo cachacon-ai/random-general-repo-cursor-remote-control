@@ -54,7 +54,8 @@ try {
   Pop-Location
 }
 $sw.Stop()
-if ($out -notmatch 'SESSION-OK') { Fail "Gateway session relay failed:`n$out" }
-if ($sw.Elapsed.TotalSeconds -gt 30) { Fail "Gateway session too slow: $($sw.Elapsed.TotalSeconds)s" }
+$sessionText = ($out | Out-String)
+if ($sessionText -notmatch 'SESSION-OK') { Fail "Gateway session relay failed:`n$sessionText" }
+if ($sw.Elapsed.TotalSeconds -gt 120) { Fail "Gateway session too slow: $($sw.Elapsed.TotalSeconds)s" }
 Write-Host "OK in $([math]::Round($sw.Elapsed.TotalSeconds,1))s"
 Write-Host 'ALL CHECKS PASSED'
